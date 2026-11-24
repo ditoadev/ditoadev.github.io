@@ -270,6 +270,13 @@ details summary { cursor: pointer; font-weight: 600; }
         <h3>Claude (notes and chat)</h3>
         <p class="small muted">Notes and chat use Claude through your own API key from console.anthropic.com. The key stays on this device. Each conversation's text is sent to Anthropic when notes are made or when you ask a question, so check that your company allows this for work meetings.</p>
         <label class="field">Claude API key<input type="password" id="apiKey" autocomplete="off" spellcheck="false" placeholder="sk-ant-…"></label>
+        <label class="field">Model
+          <select id="aiModel">
+            <option value="haiku">Claude Haiku 5.5 · recommended, lowest cost</option>
+            <option value="opus">Claude Opus 5.5 · smartest, about 40× the cost</option>
+          </select>
+        </label>
+        <p class="small muted">With Haiku, notes for a 45-minute call cost about $0.002 and a new chat about $0.01, so a $5 credit lasts a long time. The cost of a new chat is shown under the question box.</p>
         <label class="check"><input type="checkbox" id="autoNotes" checked> Make notes for new conversations automatically on this device</label>
         <div class="row"><button class="btn primary" id="saveKey">Save</button></div>
         <div class="status" id="keyStatus"></div>

@@ -1,7 +1,15 @@
 // Claude integration: per-episode notes (structured output) and chat over all context.
 // The API key is entered by the user and stays on this device.
 
-const MODEL = 'claude-opus-5-5';
+// Haiku 5.5 is the default to keep costs low; Opus 5.5 is an opt-in setting.
+// Haiku has no server-side refusal fallback, so `fallbacks` is only sent for Opus.
+// Haiku's price is 5x higher for prompts over 100K tokens, so the chat context budget stays under that.
+export const MODELS = {
+  haiku: { id: 'claude-haiku-5-5', label: 'Claude Haiku 5.5', inPerM: 0.10, outPerM: 0.50, fallbacks: false, contextChars: 280000 },
+  opus: { id: 'claude-opus-5-5', label: 'Claude Opus 5.5', inPerM: 4.00, outPerM: 20.00, fallbacks: true, contextChars: 300000 },
+};
+const modelOf = (key) => MODELS[key] || MODELS.haiku;
+const fallbackFields = (m) => (m.fallbacks ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' } : {});
 let sdk = null;
 async function client(apiKey) {
   if (!sdk) sdk = await import('./vendor/anthropic-sdk.mjs');
@@ -52,16 +60,16 @@ The transcript comes from on-device speech recognition: expect misheard words, w
 Speaker labels: "You" is the user. "Speaker N" labels are other voices told apart automatically and may be imperfect; "Call" means voices that were not separated.
 Only include decisions and promises that were actually stated. Be specific and brief.`;
 
-export async function makeNotes(apiKey, ep, { ownerName, knownTopics = [] } = {}) {
+export async function makeNotes(apiKey, ep, { ownerName, knownTopics = [], model = 'haiku' } = {}) {
   const { Anthropic, c } = await client(apiKey);
+  const m = modelOf(model);
   const header = `Conversation on ${day(ep.start)}, ${hhmm(ep.start)}–${hhmm(ep.end || ep.start)}${ep.source ? ` (${ep.source})` : ''}.` +
     (knownTopics.length ? `\nTopic labels already in use: ${knownTopics.join(', ')}` : '');
   try {
     const r = await c.beta.messages.create({
-      model: MODEL,
+      model: m.id,
       max_tokens: 16000,
-      betas: ['server-side-fallback-2026-07-01'],
-      fallbacks: 'default',
+      ...fallbackFields(m),
       output_config: { effort: 'medium', format: { type: 'json_schema', schema: NOTES_SCHEMA } },
       system: NOTES_SYSTEM,
       messages: [{ role: 'user', content: `${header}\n\n<transcript>\n${transcriptText(ep, ownerName)}\n</transcript>` }],
@@ -80,7 +88,7 @@ The user is usually on a phone: answer briefly and directly, use short bullet li
 
 // Build one stable context block (cached across the chat): notes for every episode,
 // plus full transcripts of the most recent episodes within a character budget.
-export function buildContext(episodes, { ownerName, budget = 300000 } = {}) {
+export function buildContext(episodes, { ownerName, model = 'haiku', budget = modelOf(model).contextChars } = {}) {
   const eps = episodes.filter((e) => !e.deleted && e.lines?.length).sort((a, b) => b.start - a.start);
   const parts = [`<index count="${eps.length}">`];
   for (const e of eps) {
@@ -98,12 +106,16 @@ export function buildContext(episodes, { ownerName, budget = 300000 } = {}) {
     tx.push(t); used += t.length; included++;
   }
   const text = parts.join('\n') + '\n\n<transcripts note="Most recent conversations in full; older ones only as notes above.">\n' + tx.join('\n') + '\n</transcripts>';
-  return { text, episodes: eps.length, transcripts: included, chars: text.length };
+  // Rough estimate (~4 characters per token) of what the first question in a chat costs.
+  const tokens = Math.round(text.length / 4);
+  const cost = (tokens / 1e6) * modelOf(model).inPerM;
+  return { text, episodes: eps.length, transcripts: included, chars: text.length, tokens, cost };
 }
 
 // history: [{role:'user'|'assistant', text}] ; returns final text. onText(delta) streams.
-export async function chat(apiKey, contextText, history, onText) {
+export async function chat(apiKey, contextText, history, onText, model = 'haiku') {
   const { Anthropic, c } = await client(apiKey);
+  const m = modelOf(model);
   const now = new Date();
   const messages = history.map((m, i) => ({
     role: m.role,
@@ -118,10 +130,9 @@ export async function chat(apiKey, contextText, history, onText) {
   else last.content[last.content.length - 1] = { type: 'text', text: stamp + last.content[last.content.length - 1].text };
   try {
     const stream = c.beta.messages.stream({
-      model: MODEL,
+      model: m.id,
       max_tokens: 64000,
-      betas: ['server-side-fallback-2026-07-01'],
-      fallbacks: 'default',
+      ...fallbackFields(m),
       cache_control: { type: 'ephemeral' },
       output_config: { effort: 'low' },
       system: CHAT_SYSTEM,

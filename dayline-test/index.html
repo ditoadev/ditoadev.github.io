@@ -80,7 +80,7 @@ details ol { margin: 8px 0 0; padding-left: 1.2em; color: var(--ink-2); font-siz
   <span class="eyebrow">Dayline · feasibility test · runs entirely in this browser</span>
   <h1>Meeting capture test</h1>
   <p>Checks whether this laptop can capture a Teams call (your mic plus the call audio) and transcribe it locally in Edge or Chrome, without installing anything.</p>
-  <p class="notice">Nothing you record is uploaded. The speech model is downloaded once from Hugging Face and cached by the browser. Audio is transcribed on this machine and discarded right away. Check your employer's policy before using it on real work calls; a test call with a colleague or a YouTube video is enough.</p>
+  <p class="notice">Nothing you record is uploaded. The speech model is downloaded once from this site and cached by the browser. Audio is transcribed on this machine and discarded right away. Check your employer's policy before using it on real work calls; a test call with a colleague or a YouTube video is enough.</p>
 </header>
 
 <div class="grid">
@@ -90,9 +90,9 @@ details ol { margin: 8px 0 0; padding-left: 1.2em; color: var(--ink-2); font-siz
       <div class="row">
         <label for="model">Model
           <select id="model">
-            <option value="onnx-community/whisper-tiny">Tiny · ~40 MB · fastest</option>
-            <option value="onnx-community/whisper-base" selected>Base · ~80 MB · balanced</option>
-            <option value="onnx-community/whisper-small">Small · ~250 MB · most accurate</option>
+            <option value="tiny-gpu">Tiny on GPU · ~80 MB · fastest</option>
+            <option value="tiny-cpu">Tiny on CPU · ~45 MB</option>
+            <option value="base-cpu">Base on CPU · ~80 MB · more accurate</option>
           </select>
         </label>
         <label for="lang">Language
@@ -167,7 +167,11 @@ details ol { margin: 8px 0 0; padding-left: 1.2em; color: var(--ink-2); font-siz
 <script>
 (function () {
   'use strict';
-  var TJS = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.6/dist/transformers.web.min.js';
+  var MODELS = {
+    'tiny-gpu': { model: 'onnx-community/whisper-tiny', device: 'webgpu', dtype: 'fp16', label: 'Tiny on GPU' },
+    'tiny-cpu': { model: 'onnx-community/whisper-tiny', device: 'wasm', dtype: 'q8', label: 'Tiny on CPU' },
+    'base-cpu': { model: 'onnx-community/whisper-base', device: 'wasm', dtype: 'q8', label: 'Base on CPU' }
+  };
   var $ = function (id) { return document.getElementById(id); };
 
   // ---------------- Diagnostics ----------------
@@ -175,7 +179,8 @@ details ol { margin: 8px 0 0; padding-left: 1.2em; color: var(--ink-2); font-siz
     { id: 'secure', label: 'Secure page (HTTPS)' },
     { id: 'micApi', label: 'Microphone API available' },
     { id: 'shareApi', label: 'Screen and audio sharing API available' },
-    { id: 'gpu', label: 'WebGPU for fast transcription' },
+    { id: 'files', label: 'Speech engine files reachable on this site' },
+    { id: 'gpu', label: 'WebGPU with half precision for fast transcription' },
     { id: 'model', label: 'Speech model downloaded and loaded' },
     { id: 'mic', label: 'Microphone captured' },
     { id: 'call', label: 'Call audio captured' },
@@ -202,39 +207,25 @@ details ol { margin: 8px 0 0; padding-left: 1.2em; color: var(--ink-2); font-siz
     try {
       var a = await navigator.gpu.requestAdapter();
       if (!a) throw new Error('no adapter');
-      gpuOk = true;
       var info = a.info || {};
-      setCheck('gpu', 'pass', [info.vendor, info.architecture, info.description].filter(Boolean).join(' · ') || 'Adapter found');
-    } catch (e) { setCheck('gpu', 'fail', 'No GPU adapter (' + e.message + '). Will fall back to CPU mode.'); }
+      var name = [info.vendor, info.architecture, info.description].filter(Boolean).join(' · ') || 'Adapter found';
+      if (!a.features.has('shader-f16')) { setCheck('gpu', 'fail', name + ', but no half-precision support. Use a CPU model.'); return; }
+      gpuOk = true;
+      setCheck('gpu', 'pass', name);
+    } catch (e) { setCheck('gpu', 'fail', 'No GPU adapter (' + e.message + '). Use a CPU model.'); }
+    if (!gpuOk) $('model').value = 'base-cpu';
+  })();
+  (async function () {
+    var paths = ['worker.js', 'vendor/transformers.min.js', 'vendor/ort-wasm-simd-threaded.jsep.mjs', 'models/onnx-community/whisper-tiny/config.json'];
+    var bad = [];
+    for (var i = 0; i < paths.length; i++) {
+      try { var r = await fetch(paths[i], { method: 'HEAD', cache: 'no-store' }); if (!r.ok) bad.push(paths[i] + ' (' + r.status + ')'); }
+      catch (e) { bad.push(paths[i] + ' (' + e.message + ')'); }
+    }
+    setCheck('files', bad.length ? 'fail' : 'pass', bad.length ? 'Could not fetch: ' + bad.join(', ') : '');
   })();
 
-  // ---------------- Worker running Whisper ----------------
-  var workerSrc = [
-    "import { pipeline, env } from '" + TJS + "';",
-    "env.allowLocalModels = false;",
-    "let asr = null;",
-    "self.onmessage = async (e) => {",
-    "  const m = e.data;",
-    "  if (m.type === 'load') {",
-    "    try {",
-    "      const opts = { device: m.device, progress_callback: (p) => self.postMessage({ type: 'progress', p }) };",
-    "      opts.dtype = m.device === 'webgpu' ? { encoder_model: 'fp32', decoder_model_merged: 'q4' } : 'q8';",
-    "      asr = await pipeline('automatic-speech-recognition', m.model, opts);",
-    "      // warm-up so the first real chunk is not slow",
-    "      await asr(new Float32Array(16000), { language: 'en', task: 'transcribe' });",
-    "      self.postMessage({ type: 'ready', device: m.device });",
-    "    } catch (err) { self.postMessage({ type: 'error', message: String(err && err.message || err) }); }",
-    "  } else if (m.type === 'run') {",
-    "    const t0 = performance.now();",
-    "    try {",
-    "      const o = { task: 'transcribe', chunk_length_s: 30 };",
-    "      if (m.language) o.language = m.language;",
-    "      const out = await asr(m.audio, o);",
-    "      self.postMessage({ type: 'result', id: m.id, text: (out.text || '').trim(), ms: performance.now() - t0 });",
-    "    } catch (err) { self.postMessage({ type: 'result', id: m.id, text: '', error: String(err && err.message || err), ms: performance.now() - t0 }); }",
-    "  }",
-    "};"
-  ].join('\n');
+  // ---------------- Worker running Whisper (worker.js, same site) ----------------
   var worker = null, ready = false, busy = false, queue = [], files = {};
   var totalAudio = 0, totalMs = 0, seq = 0;
 
@@ -242,13 +233,26 @@ details ol { margin: 8px 0 0; padding-left: 1.2em; color: var(--ink-2); font-siz
     if (worker) worker.terminate();
     ready = false; files = {};
     $('loadBtn').disabled = true;
-    status('loadStatus', 'Downloading model. The first time can take a minute.');
-    var url = URL.createObjectURL(new Blob([workerSrc], { type: 'text/javascript' }));
-    worker = new Worker(url, { type: 'module' });
-    worker.onerror = function (e) { status('loadStatus', 'Could not start the transcription worker: ' + (e.message || 'blocked script') + '. Your network may block cdn.jsdelivr.net.', 'err'); setCheck('model', 'fail', 'Worker failed to start; cdn.jsdelivr.net may be blocked.'); $('loadBtn').disabled = false; };
-    worker.onmessage = onWorker;
-    worker.postMessage({ type: 'load', model: $('model').value, device: gpuOk ? 'webgpu' : 'wasm' });
+    var cfg = MODELS[$('model').value];
+    if (cfg.device === 'webgpu' && !gpuOk) { status('loadStatus', 'This laptop has no suitable GPU. Pick a CPU model.', 'err'); $('loadBtn').disabled = false; return; }
+    status('loadStatus', 'Starting…');
+    var alive = false;
+    try { worker = new Worker('worker.js', { type: 'module' }); }
+    catch (e) { workerFailed('Module workers are not allowed here (' + e.message + ').'); return; }
+    worker.onerror = function (e) { e.preventDefault && e.preventDefault(); workerFailed(alive ? (e.message || 'unknown error') : 'The speech library did not load (' + (e.message || 'script blocked or failed to parse') + ').'); };
+    worker.onmessage = function (e) {
+      if (e.data.type === 'alive') { alive = true; status('loadStatus', 'Downloading model. The first time can take a minute.'); return; }
+      onWorker(e);
+    };
+    worker.postMessage({ type: 'load', model: cfg.model, device: cfg.device, dtype: cfg.dtype });
+    loadingLabel = cfg.label;
   });
+  var loadingLabel = '';
+  function workerFailed(msg) {
+    status('loadStatus', msg + ' Use Copy report and send it over.', 'err');
+    setCheck('model', 'fail', msg);
+    $('loadBtn').disabled = false;
+  }
 
   function onWorker(e) {
     var m = e.data;
@@ -262,17 +266,18 @@ details ol { margin: 8px 0 0; padding-left: 1.2em; color: var(--ink-2); font-siz
     } else if (m.type === 'ready') {
       ready = true; $('loadBtn').disabled = false; $('loadBar').style.width = '100%';
       status('loadStatus', 'Ready · running on ' + (m.device === 'webgpu' ? 'GPU (WebGPU)' : 'CPU (WebAssembly)'), 'ok');
-      setCheck('model', 'pass', $('model').selectedOptions[0].textContent + ' on ' + (m.device === 'webgpu' ? 'GPU' : 'CPU'));
+      setCheck('model', 'pass', loadingLabel);
       pump();
     } else if (m.type === 'error') {
       $('loadBtn').disabled = false;
-      status('loadStatus', 'Model failed to load: ' + m.message + '. If this mentions fetch or network, your company network may block huggingface.co.', 'err');
-      setCheck('model', 'fail', m.message);
+      var tip = /webgpu|gpu|adapter/i.test(m.message) ? ' Try a CPU model.' : '';
+      status('loadStatus', 'Model failed to load: ' + m.message + '.' + tip, 'err');
+      setCheck('model', 'fail', loadingLabel + ': ' + m.message);
     } else if (m.type === 'result') {
       busy = false;
       var job = pending[m.id]; delete pending[m.id];
       if (job) {
-        totalAudio += job.audio.length / 16000; totalMs += m.ms;
+        totalAudio += job.secs; totalMs += m.ms;
         var rtf = totalAudio / (totalMs / 1000);
         $('rtfStat').textContent = 'speed ' + rtf.toFixed(1) + '× real time';
         $('audioStat').textContent = totalAudio.toFixed(0) + ' s transcribed';
@@ -288,6 +293,7 @@ details ol { margin: 8px 0 0; padding-left: 1.2em; color: var(--ink-2); font-siz
     return !s || /^\[.*\]$|^\(.*\)$/.test(t.trim()) || ['thank you', 'thanks for watching', 'you', 'bye'].indexOf(s) >= 0;
   }
   function enqueue(job) {
+    job.secs = job.audio.length / 16000; // measure before the buffer is transferred to the worker
     queue.push(job);
     if (queue.length > 12) queue.shift(); // keep up rather than fall far behind
     pump();

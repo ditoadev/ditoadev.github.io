@@ -1,6 +1,6 @@
 import { CaptureEngine, MODELS, detectGpu, canShareAudio } from './capture.js';
 import * as store from './store.js';
-import { makeNotes, buildContext, chat, speakerName } from './ai.js';
+import { makeNotes, buildContext, chat, speakerName, MODELS as AI_MODELS } from './ai.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -24,7 +24,7 @@ function chipClass(who) {
 }
 
 // ---------------- Settings & state ----------------
-let settings = { ownerName: '', gh: { owner: '', repo: '', token: '' }, passphrase: '', apiKey: '', autoNotes: true };
+let settings = { ownerName: '', gh: { owner: '', repo: '', token: '' }, passphrase: '', apiKey: '', autoNotes: true, aiModel: 'haiku' };
 let episodes = [];
 let sync = null;
 const saveSettings = () => store.kvSet('settings', settings);
@@ -88,7 +88,7 @@ async function notesFor(ep) {
   status('notesStatus', `Making notes for "${ep.notes?.title || ep.title}"…`);
   try {
     const topics = [...new Set(episodes.flatMap((e) => e.notes?.topics || []))].slice(0, 40);
-    ep.notes = await makeNotes(settings.apiKey, ep, { ownerName: settings.ownerName, knownTopics: topics });
+    ep.notes = await makeNotes(settings.apiKey, ep, { ownerName: settings.ownerName, knownTopics: topics, model: settings.aiModel });
     delete ep.notesError;
     await store.saveEpisode(ep);
     status('notesStatus', '');
@@ -214,8 +214,9 @@ const SUGGESTIONS = ['What did I promise recently?', 'Summarize my last meeting'
 function updateCtxLine() {
   const n = episodes.filter((e) => e.lines?.length).length;
   if (!n) { $('ctxLine').textContent = ''; return; }
-  const c = chatContext || buildContext(episodes, { ownerName: settings.ownerName });
-  $('ctxLine').textContent = `${c.episodes} conversations · ${c.transcripts} in full · ~${Math.round(c.chars / 4000)}k tokens`;
+  const c = chatContext || buildContext(episodes, { ownerName: settings.ownerName, model: settings.aiModel });
+  const price = c.cost < 0.01 ? 'under $0.01' : '~$' + c.cost.toFixed(2);
+  $('ctxLine').textContent = `${c.episodes} conversations · ${c.transcripts} in full · ~${Math.round(c.tokens / 1000)}k tokens · ${price} per new chat`;
 }
 function renderChat() {
   const box = $('msgs');
@@ -262,14 +263,14 @@ async function ask(q) {
   history.push({ role: 'user', text: q.trim() });
   const a = { role: 'assistant', text: '', streaming: true };
   history.push(a); renderChat();
-  if (!chatContext) chatContext = buildContext(episodes, { ownerName: settings.ownerName });
+  if (!chatContext) chatContext = buildContext(episodes, { ownerName: settings.ownerName, model: settings.aiModel });
   const turns = history.filter((m) => !m.error && m !== a).map((m) => ({ role: m.role, text: m.text }));
   let raf = 0;
   try {
     await chat(settings.apiKey, chatContext.text, turns, (d) => {
       a.text += d;
       if (!raf) raf = requestAnimationFrame(() => { raf = 0; const last = $('msgs').lastElementChild; if (last) { last.innerHTML = md(a.text); scrollChat(); } });
-    });
+    }, settings.aiModel);
     a.streaming = false;
   } catch (e) {
     a.streaming = false; a.error = e.message;
@@ -402,7 +403,7 @@ addEventListener('beforeunload', (e) => { if (cap.ep) { store.saveEpisode(cap.ep
 function fillSettings() {
   $('ownerName').value = settings.ownerName || '';
   $('ghOwner').value = settings.gh.owner; $('ghRepo').value = settings.gh.repo; $('ghToken').value = settings.gh.token;
-  $('passphrase').value = settings.passphrase; $('apiKey').value = settings.apiKey; $('autoNotes').checked = settings.autoNotes !== false;
+  $('passphrase').value = settings.passphrase; $('apiKey').value = settings.apiKey; $('autoNotes').checked = settings.autoNotes !== false; $('aiModel').value = settings.aiModel || 'haiku';
 }
 $('ownerName').addEventListener('change', async () => { settings.ownerName = $('ownerName').value.trim(); await saveSettings(); chatContext = null; });
 $('saveSync').addEventListener('click', async () => {
@@ -416,6 +417,7 @@ $('saveSync').addEventListener('click', async () => {
 $('forgetSync').addEventListener('click', async () => { settings.gh = { owner: '', repo: '', token: '' }; settings.passphrase = ''; sync = null; await saveSettings(); fillSettings(); setPill('', 'sync off'); status('syncStatus', 'Sync removed from this device. Local conversations are kept.'); });
 $('saveKey').addEventListener('click', async () => {
   settings.apiKey = $('apiKey').value.trim(); settings.autoNotes = $('autoNotes').checked;
+  if (settings.aiModel !== $('aiModel').value) { settings.aiModel = $('aiModel').value; chatContext = null; }
   await saveSettings(); status('keyStatus', settings.apiKey ? 'Saved on this device.' : 'Key removed.', 'ok');
   episodes.forEach((e) => delete e.notesError); queueNotes();
 });

@@ -12,7 +12,7 @@
 /* Layout: steps column on the left, live transcript on the right; stacks on narrow screens. */
 :root {
   --bg: #F2F4F6; --surface: #FFFFFF; --sunk: #E7EBEF; --ink: #15202B; --ink-2: #3D4A57; --muted: #66737F; --line: #D5DCE3;
-  --accent: #0B6F73; --accent-soft: #D3EBEA; --amber: #B5651D; --amber-soft: #F6E4D2; --rose: #A8384F; --rose-soft: #F5DDE2; --ok: #2E7D4F; --ok-soft: #DDF0E4;
+  --accent: #0B6F73; --accent-soft: #D3EBEA; --amber: #B5651D; --amber-soft: #F6E4D2; --rose: #A8384F; --rose-soft: #F5DDE2; --ok: #2E7D4F; --ok-soft: #DDF0E4; --violet: #5A4FA8; --violet-soft: #E4E1F5;
   --f-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
   --f-body: "Instrument Sans", system-ui, "Segoe UI", sans-serif;
   --f-mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
@@ -21,7 +21,7 @@
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #0F151B; --surface: #172029; --sunk: #1E2933; --ink: #E6ECF1; --ink-2: #B9C4CE; --muted: #8796A3; --line: #2A3743;
-    --accent: #4FC2C2; --accent-soft: #143A3C; --amber: #E39B5A; --amber-soft: #3B2A1B; --rose: #E57F94; --rose-soft: #3D1F27; --ok: #6FD39A; --ok-soft: #173426;
+    --accent: #4FC2C2; --accent-soft: #143A3C; --amber: #E39B5A; --amber-soft: #3B2A1B; --rose: #E57F94; --rose-soft: #3D1F27; --ok: #6FD39A; --ok-soft: #173426; --violet: #A99FEB; --violet-soft: #2A2647;
     color-scheme: dark;
   }
 }
@@ -66,7 +66,13 @@ button:focus-visible, select:focus-visible { outline: 2px solid var(--accent); o
 .line .t { font: .75rem var(--f-mono); color: var(--muted); padding-top: 3px; }
 .chip { font: 500 .7rem var(--f-mono); border-radius: 99px; padding: 2px 8px; height: fit-content; text-align: center; }
 .chip.you { background: var(--accent-soft); color: var(--accent); }
-.chip.call { background: var(--amber-soft); color: var(--amber); }
+.chip.call, .chip.s1, .chip.s5 { background: var(--amber-soft); color: var(--amber); }
+.chip.s2, .chip.s6 { background: var(--violet-soft); color: var(--violet); }
+.chip.s3 { background: var(--rose-soft); color: var(--rose); }
+.chip.s4 { background: var(--ok-soft); color: var(--ok); }
+button.chip { border: 0; cursor: pointer; font: 500 .7rem var(--f-mono); padding: 2px 8px; }
+.line { grid-template-columns: 64px 92px minmax(0, 1fr); }
+.check { display: flex; gap: 8px; align-items: center; font-size: .88rem; color: var(--ink-2); }
 .empty { color: var(--muted); font-size: .92rem; padding: 18px 0; }
 .stats { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: .82rem; color: var(--muted); }
 details summary { cursor: pointer; font-weight: 600; }
@@ -90,6 +96,7 @@ details ol { margin: 8px 0 0; padding-left: 1.2em; color: var(--ink-2); font-siz
       <div class="row">
         <label for="model">Model
           <select id="model">
+            <option value="base-gpu" selected>Base on GPU · ~95 MB · recommended</option>
             <option value="tiny-gpu">Tiny on GPU · ~80 MB · fastest</option>
             <option value="tiny-cpu">Tiny on CPU · ~45 MB</option>
             <option value="base-cpu">Base on CPU · ~80 MB · more accurate</option>
@@ -105,6 +112,7 @@ details ol { margin: 8px 0 0; padding-left: 1.2em; color: var(--ink-2); font-siz
           </select>
         </label>
       </div>
+      <label class="check" for="diar"><input type="checkbox" id="diar" checked> Tell the people on the call apart (adds ~32 MB)</label>
       <div class="row"><button class="primary" id="loadBtn">Load model</button></div>
       <div class="bar" aria-hidden="true"><i id="loadBar"></i></div>
       <div class="status" id="loadStatus">Not loaded.</div>
@@ -130,6 +138,10 @@ details ol { margin: 8px 0 0; padding-left: 1.2em; color: var(--ink-2); font-siz
       <label for="thr">Sensitivity: lower picks up quieter speech
         <input type="range" id="thr" min="0.002" max="0.05" step="0.001" value="0.012">
       </label>
+      <label for="spk">Speaker matching: raise it if two people get merged, lower it if one person gets split
+        <input type="range" id="spk" min="0.3" max="0.75" step="0.01" value="0.5">
+      </label>
+      <p style="font-size:.82rem">Click a speaker label in the transcript to give it a name.</p>
       <div class="stats mono"><span id="queueStat">queue 0</span><span id="rtfStat">speed –</span><span id="audioStat">0 s transcribed</span></div>
     </div>
 
@@ -168,7 +180,9 @@ details ol { margin: 8px 0 0; padding-left: 1.2em; color: var(--ink-2); font-siz
 (function () {
   'use strict';
   var MODELS = {
-    'tiny-gpu': { model: 'onnx-community/whisper-tiny', device: 'webgpu', dtype: 'fp16', label: 'Tiny on GPU' },
+    // Base's GPU decoder file is over GitHub's 100 MB limit, so the encoder runs on the GPU and the decoder on the CPU.
+    'base-gpu': { model: 'onnx-community/whisper-base', device: { encoder_model: 'webgpu', decoder_model_merged: 'wasm' }, dtype: { encoder_model: 'fp16', decoder_model_merged: 'q8' }, label: 'Base on GPU', gpu: true },
+    'tiny-gpu': { model: 'onnx-community/whisper-tiny', device: 'webgpu', dtype: 'fp16', label: 'Tiny on GPU', gpu: true },
     'tiny-cpu': { model: 'onnx-community/whisper-tiny', device: 'wasm', dtype: 'q8', label: 'Tiny on CPU' },
     'base-cpu': { model: 'onnx-community/whisper-base', device: 'wasm', dtype: 'q8', label: 'Base on CPU' }
   };
@@ -216,7 +230,7 @@ details ol { margin: 8px 0 0; padding-left: 1.2em; color: var(--ink-2); font-siz
     if (!gpuOk) $('model').value = 'base-cpu';
   })();
   (async function () {
-    var paths = ['worker.js', 'vendor/transformers.min.js', 'vendor/ort-wasm-simd-threaded.jsep.mjs', 'models/onnx-community/whisper-tiny/config.json'];
+    var paths = ['worker.js', 'vendor/transformers.min.js', 'vendor/ort-wasm-simd-threaded.jsep.mjs', 'models/onnx-community/whisper-tiny/config.json', 'models/onnx-community/pyannote-segmentation-3.0/config.json'];
     var bad = [];
     for (var i = 0; i < paths.length; i++) {
       try { var r = await fetch(paths[i], { method: 'HEAD', cache: 'no-store' }); if (!r.ok) bad.push(paths[i] + ' (' + r.status + ')'); }
@@ -234,7 +248,7 @@ details ol { margin: 8px 0 0; padding-left: 1.2em; color: var(--ink-2); font-siz
     ready = false; files = {};
     $('loadBtn').disabled = true;
     var cfg = MODELS[$('model').value];
-    if (cfg.device === 'webgpu' && !gpuOk) { status('loadStatus', 'This laptop has no suitable GPU. Pick a CPU model.', 'err'); $('loadBtn').disabled = false; return; }
+    if (cfg.gpu && !gpuOk) { status('loadStatus', 'This laptop has no suitable GPU. Pick a CPU model.', 'err'); $('loadBtn').disabled = false; return; }
     status('loadStatus', 'Starting…');
     var alive = false;
     try { worker = new Worker('worker.js', { type: 'module' }); }
@@ -244,10 +258,13 @@ details ol { margin: 8px 0 0; padding-left: 1.2em; color: var(--ink-2); font-siz
       if (e.data.type === 'alive') { alive = true; status('loadStatus', 'Downloading model. The first time can take a minute.'); return; }
       onWorker(e);
     };
-    worker.postMessage({ type: 'load', model: cfg.model, device: cfg.device, dtype: cfg.dtype });
-    loadingLabel = cfg.label;
+    diarOn = $('diar').checked;
+    worker.postMessage({ type: 'threshold', value: +$('spk').value });
+    worker.postMessage({ type: 'load', model: cfg.model, device: cfg.device, dtype: cfg.dtype, diarize: diarOn });
+    loadingLabel = cfg.label + (diarOn ? ' + speaker separation' : '');
   });
-  var loadingLabel = '';
+  var loadingLabel = '', diarOn = false, speakerCount = 0;
+  $('spk').addEventListener('change', function () { if (worker) worker.postMessage({ type: 'threshold', value: +this.value }); });
   function workerFailed(msg) {
     status('loadStatus', msg + ' Use Copy report and send it over.', 'err');
     setCheck('model', 'fail', msg);
@@ -265,7 +282,7 @@ details ol { margin: 8px 0 0; padding-left: 1.2em; color: var(--ink-2); font-siz
       if (p.status === 'ready') status('loadStatus', 'Preparing model…');
     } else if (m.type === 'ready') {
       ready = true; $('loadBtn').disabled = false; $('loadBar').style.width = '100%';
-      status('loadStatus', 'Ready · running on ' + (m.device === 'webgpu' ? 'GPU (WebGPU)' : 'CPU (WebAssembly)'), 'ok');
+      status('loadStatus', 'Ready · ' + loadingLabel, 'ok');
       setCheck('model', 'pass', loadingLabel);
       pump();
     } else if (m.type === 'error') {
@@ -282,7 +299,12 @@ details ol { margin: 8px 0 0; padding-left: 1.2em; color: var(--ink-2); font-siz
         $('rtfStat').textContent = 'speed ' + rtf.toFixed(1) + '× real time';
         $('audioStat').textContent = totalAudio.toFixed(0) + ' s transcribed';
         if (totalAudio > 20) setCheck('speed', rtf >= 1.2 ? 'pass' : 'fail', rtf.toFixed(1) + '× real time' + (rtf < 1.2 ? '. Try the Tiny model.' : ''));
-        if (m.text && !isJunk(m.text)) addLine(job.t, job.who, m.text);
+        if (m.speakers) speakerCount = m.speakers;
+        (m.lines || []).forEach(function (l) {
+          if (isJunk(l.text)) return;
+          var start = new Date(job.t.getTime() + l.start * 1000), end = new Date(job.t.getTime() + l.end * 1000);
+          addLine(start, end, l.speaker ? 'S' + l.speaker : job.who, l.text);
+        });
       }
       pump();
     }
@@ -303,7 +325,7 @@ details ol { margin: 8px 0 0; padding-left: 1.2em; color: var(--ink-2); font-siz
     if (!ready || busy || !queue.length) return;
     var job = queue.shift(); busy = true;
     var id = ++seq; pending[id] = job;
-    worker.postMessage({ type: 'run', id: id, audio: job.audio, language: $('lang').value || null }, [job.audio.buffer]);
+    worker.postMessage({ type: 'run', id: id, audio: job.audio, language: $('lang').value || null, diarize: diarOn && job.who === 'Call' }, [job.audio.buffer]);
     $('queueStat').textContent = 'queue ' + queue.length;
   }
 
@@ -412,15 +434,34 @@ details ol { margin: 8px 0 0; padding-left: 1.2em; color: var(--ink-2); font-siz
   // ---------------- Transcript ----------------
   var lines = [];
   function hhmmss(d) { return d.toTimeString().slice(0, 8); }
-  function addLine(t, who, text) {
-    lines.push({ t: t, who: who, text: text });
+  // who: 'You', 'Call' (no speaker separation) or 'S<n>' (call speaker n).
+  var names = {};
+  function label(who) { return names[who] || (who.charAt(0) === 'S' && who !== 'S' ? 'Speaker ' + who.slice(1) : who); }
+  function chipClass(who) { return who === 'You' ? 'you' : who === 'Call' ? 'call' : 's' + (((+who.slice(1)) - 1) % 6 + 1); }
+  function addLine(t, end, who, text) {
+    var last = lines[lines.length - 1];
+    // Join a line cut by the 15 s segment limit or a short pause back onto the previous one.
+    if (last && last.who === who && t - last.end < 2000 && !/[.?!]["')]?$/.test(last.text)) {
+      last.text += ' ' + text; last.end = end;
+      last.el.querySelector('.txt').textContent = last.text;
+      return;
+    }
     var empty = $('txEmpty'); if (empty) empty.remove();
     var el = document.createElement('div'); el.className = 'line';
-    el.innerHTML = '<span class="t">' + hhmmss(t) + '</span><span class="chip ' + (who === 'You' ? 'you' : 'call') + '">' + who + '</span><span>' + esc(text) + '</span>';
+    el.innerHTML = '<span class="t">' + hhmmss(t) + '</span><button class="chip ' + chipClass(who) + '" data-who="' + who + '" title="Click to name this speaker">' + esc(label(who)) + '</button><span class="txt"></span>';
+    el.querySelector('.txt').textContent = text;
+    lines.push({ t: t, end: end, who: who, text: text, el: el });
     var box = $('tx'), atEnd = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
     box.appendChild(el); if (atEnd) box.scrollTop = box.scrollHeight;
   }
-  function asText() { return lines.map(function (l) { return hhmmss(l.t) + '  ' + l.who + ': ' + l.text; }).join('\n'); }
+  $('tx').addEventListener('click', function (e) {
+    var c = e.target.closest('[data-who]'); if (!c) return;
+    var who = c.dataset.who, n = prompt('Name for ' + label(who) + ':', names[who] || '');
+    if (n === null) return;
+    n = n.trim(); if (n) names[who] = n; else delete names[who];
+    document.querySelectorAll('[data-who="' + who + '"]').forEach(function (x) { x.textContent = label(who); });
+  });
+  function asText() { return lines.map(function (l) { return hhmmss(l.t) + '  ' + label(l.who) + ': ' + l.text; }).join('\n'); }
   function copy(text, statusId, btn) {
     var done = function () { if (statusId) status(statusId, 'Copied.', 'ok'); else { var o = btn.textContent; btn.textContent = 'Copied'; setTimeout(function () { btn.textContent = o; }, 1500); } };
     if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, function () { fallbackCopy(text); done(); });
@@ -434,11 +475,14 @@ details ol { margin: 8px 0 0; padding-left: 1.2em; color: var(--ink-2); font-siz
     a.download = 'dayline-transcript-' + new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-') + '.txt';
     a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
   });
-  $('clearTx').addEventListener('click', function () { lines = []; $('tx').innerHTML = '<div class="empty" id="txEmpty">Transcript cleared.</div>'; });
+  $('clearTx').addEventListener('click', function () {
+    lines = []; names = {}; speakerCount = 0;
+    if (worker) worker.postMessage({ type: 'reset-speakers' }); $('tx').innerHTML = '<div class="empty" id="txEmpty">Transcript cleared.</div>'; });
   $('copyReport').addEventListener('click', function () {
     var r = ['Dayline capture test report', new Date().toISOString(), navigator.userAgent, ''];
     checks.forEach(function (c) { var x = res[c.id] || { state: 'wait', note: 'not tested' }; r.push((x.state === 'pass' ? 'PASS ' : x.state === 'fail' ? 'FAIL ' : '---- ') + c.label + (x.note ? ' — ' + x.note : '')); });
-    r.push('', $('rtfStat').textContent, $('audioStat').textContent);
+    r.push('', $('rtfStat').textContent, $('audioStat').textContent,
+      'speaker separation ' + (diarOn ? 'on · ' + speakerCount + ' call speakers found · matching ' + $('spk').value : 'off'));
     copy(r.join('\n'), 'reportStatus');
   });
   function status(id, text, cls) { var el = $(id); el.textContent = text; el.className = 'status' + (cls ? ' ' + cls : ''); }

@@ -308,7 +308,7 @@ cap.engine = new CaptureEngine({
   const g = await detectGpu();
   $('gpuInfo').textContent = g.ok ? 'GPU: ' + g.name : 'No suitable GPU, using CPU';
   if (!g.ok) $('model').value = isPhone() ? 'tiny-cpu' : 'base-cpu';
-  $('model').querySelectorAll('option').forEach((o) => { if (MODELS[o.value].gpu && !g.ok) o.disabled = true; });
+  $('model').querySelectorAll('option').forEach((o) => { const m = MODELS[o.value]; if ((m.gpu && !g.ok) || (m.f16 && !g.f16)) o.disabled = true; });
 })();
 
 $('loadBtn').addEventListener('click', async () => {

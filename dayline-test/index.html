@@ -1,0 +1,443 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dayline Meeting Capture Test</title>
+<meta name="robots" content="noindex">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700&family=Instrument+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: steps column on the left, live transcript on the right; stacks on narrow screens. */
+:root {
+  --bg: #F2F4F6; --surface: #FFFFFF; --sunk: #E7EBEF; --ink: #15202B; --ink-2: #3D4A57; --muted: #66737F; --line: #D5DCE3;
+  --accent: #0B6F73; --accent-soft: #D3EBEA; --amber: #B5651D; --amber-soft: #F6E4D2; --rose: #A8384F; --rose-soft: #F5DDE2; --ok: #2E7D4F; --ok-soft: #DDF0E4;
+  --f-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --f-body: "Instrument Sans", system-ui, "Segoe UI", sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0F151B; --surface: #172029; --sunk: #1E2933; --ink: #E6ECF1; --ink-2: #B9C4CE; --muted: #8796A3; --line: #2A3743;
+    --accent: #4FC2C2; --accent-soft: #143A3C; --amber: #E39B5A; --amber-soft: #3B2A1B; --rose: #E57F94; --rose-soft: #3D1F27; --ok: #6FD39A; --ok-soft: #173426;
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--ink); font: 15px/1.55 var(--f-body); padding: 0 max(16px, env(safe-area-inset-right, 0px)) 48px max(16px, env(safe-area-inset-left, 0px)); }
+.page { max-width: 1180px; margin: 0 auto; display: grid; gap: 20px; }
+header { padding-top: 32px; display: grid; gap: 8px; }
+h1 { font: 700 clamp(1.8rem, 4vw, 2.6rem)/1.1 var(--f-display); margin: 0; letter-spacing: -0.01em; }
+h2 { font: 700 1.15rem/1.2 var(--f-display); margin: 0; }
+p { margin: 0; max-width: 70ch; color: var(--ink-2); }
+.eyebrow { font: 500 0.72rem var(--f-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.mono { font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
+.notice { background: var(--accent-soft); border-radius: 10px; padding: 12px 14px; font-size: .9rem; color: var(--ink); }
+.grid { display: grid; grid-template-columns: minmax(0, 420px) minmax(0, 1fr); gap: 20px; align-items: start; }
+@media (max-width: 900px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+.col { display: grid; gap: 14px; min-width: 0; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: grid; gap: 10px; min-width: 0; }
+.step-h { display: flex; align-items: baseline; gap: 10px; }
+.step-h .n { font: 500 .8rem var(--f-mono); color: var(--accent); }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+label { font-size: .85rem; color: var(--muted); display: grid; gap: 4px; }
+select, input[type=range] { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+button { font: 600 .9rem var(--f-body); border-radius: 9px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); padding: 8px 14px; cursor: pointer; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+button:disabled { opacity: .45; cursor: not-allowed; }
+button:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.status { font-size: .85rem; color: var(--muted); min-height: 1.3em; }
+.status.err { color: var(--rose); }
+.status.ok { color: var(--ok); }
+.bar { height: 8px; background: var(--sunk); border-radius: 99px; overflow: hidden; }
+.bar > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .08s linear; }
+.bar.call > i { background: var(--amber); }
+.meter { display: grid; grid-template-columns: 52px minmax(0, 1fr) 70px; gap: 10px; align-items: center; font-size: .82rem; }
+.checks { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: .88rem; }
+.checks li { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 6px; }
+.checks .ic { font-family: var(--f-mono); font-weight: 500; }
+.ic.pass { color: var(--ok); } .ic.fail { color: var(--rose); } .ic.wait { color: var(--muted); }
+.checks small { display: block; color: var(--muted); }
+.transcript { display: grid; gap: 8px; max-height: 70vh; overflow-y: auto; padding-right: 4px; }
+.line { display: grid; grid-template-columns: 64px 56px minmax(0, 1fr); gap: 10px; font-size: .95rem; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.line .t { font: .75rem var(--f-mono); color: var(--muted); padding-top: 3px; }
+.chip { font: 500 .7rem var(--f-mono); border-radius: 99px; padding: 2px 8px; height: fit-content; text-align: center; }
+.chip.you { background: var(--accent-soft); color: var(--accent); }
+.chip.call { background: var(--amber-soft); color: var(--amber); }
+.empty { color: var(--muted); font-size: .92rem; padding: 18px 0; }
+.stats { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: .82rem; color: var(--muted); }
+details summary { cursor: pointer; font-weight: 600; }
+details ol { margin: 8px 0 0; padding-left: 1.2em; color: var(--ink-2); font-size: .9rem; display: grid; gap: 4px; }
+@media (prefers-reduced-motion: reduce) { .bar > i { transition: none; } }
+</style>
+</head>
+<body>
+<div class="page">
+<header>
+  <span class="eyebrow">Dayline · feasibility test · runs entirely in this browser</span>
+  <h1>Meeting capture test</h1>
+  <p>Checks whether this laptop can capture a Teams call (your mic plus the call audio) and transcribe it locally in Edge or Chrome, without installing anything.</p>
+  <p class="notice">Nothing you record is uploaded. The speech model is downloaded once from Hugging Face and cached by the browser. Audio is transcribed on this machine and discarded right away. Check your employer's policy before using it on real work calls; a test call with a colleague or a YouTube video is enough.</p>
+</header>
+
+<div class="grid">
+  <div class="col">
+    <div class="card">
+      <div class="step-h"><span class="n">1</span><h2>Load the speech model</h2></div>
+      <div class="row">
+        <label for="model">Model
+          <select id="model">
+            <option value="onnx-community/whisper-tiny">Tiny · ~40 MB · fastest</option>
+            <option value="onnx-community/whisper-base" selected>Base · ~80 MB · balanced</option>
+            <option value="onnx-community/whisper-small">Small · ~250 MB · most accurate</option>
+          </select>
+        </label>
+        <label for="lang">Language
+          <select id="lang">
+            <option value="">Detect automatically</option>
+            <option value="en">English</option>
+            <option value="nl">Dutch</option>
+            <option value="fr">French</option>
+            <option value="de">German</option>
+          </select>
+        </label>
+      </div>
+      <div class="row"><button class="primary" id="loadBtn">Load model</button></div>
+      <div class="bar" aria-hidden="true"><i id="loadBar"></i></div>
+      <div class="status" id="loadStatus">Not loaded.</div>
+    </div>
+
+    <div class="card">
+      <div class="step-h"><span class="n">2</span><h2>Capture your microphone</h2></div>
+      <div class="row"><button id="micBtn">Start microphone</button></div>
+      <div class="meter"><span class="chip you">You</span><div class="bar"><i id="micLvl"></i></div><span class="mono" id="micState">off</span></div>
+      <div class="status" id="micStatus"></div>
+    </div>
+
+    <div class="card">
+      <div class="step-h"><span class="n">3</span><h2>Share the call audio</h2></div>
+      <p style="font-size:.88rem">Teams desktop app: choose <b>Entire screen</b> and turn on <b>Also share system audio</b>. Teams in a browser: choose that <b>tab</b> and keep <b>Also share tab audio</b> on. Wear headphones so your mic does not pick up the call.</p>
+      <div class="row"><button id="callBtn">Share call audio</button></div>
+      <div class="meter"><span class="chip call">Call</span><div class="bar call"><i id="callLvl"></i></div><span class="mono" id="callState">off</span></div>
+      <div class="status" id="callStatus"></div>
+    </div>
+
+    <div class="card">
+      <h2>Speech detection</h2>
+      <label for="thr">Sensitivity: lower picks up quieter speech
+        <input type="range" id="thr" min="0.002" max="0.05" step="0.001" value="0.012">
+      </label>
+      <div class="stats mono"><span id="queueStat">queue 0</span><span id="rtfStat">speed –</span><span id="audioStat">0 s transcribed</span></div>
+    </div>
+
+    <div class="card">
+      <h2>Diagnostics</h2>
+      <ul class="checks" id="checks"></ul>
+      <div class="row"><button id="copyReport">Copy report</button></div>
+      <div class="status" id="reportStatus"></div>
+    </div>
+
+    <details class="card">
+      <summary>Test without a meeting</summary>
+      <ol>
+        <li>Open a talk or podcast on YouTube in another tab.</li>
+        <li>Click <b>Share call audio</b>, pick that tab, keep tab audio on.</li>
+        <li>Talk over it with the microphone running. You should see both <i>You</i> and <i>Call</i> lines.</li>
+      </ol>
+    </details>
+  </div>
+
+  <div class="card">
+    <div class="row" style="justify-content:space-between">
+      <h2>Live transcript</h2>
+      <div class="row">
+        <button id="copyTx">Copy</button>
+        <button id="saveTx">Download .txt</button>
+        <button id="clearTx">Clear</button>
+      </div>
+    </div>
+    <div class="transcript" id="tx" aria-live="polite"><div class="empty" id="txEmpty">Lines appear here a few seconds after someone stops talking. Load the model, then start the microphone or share call audio.</div></div>
+  </div>
+</div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var TJS = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.6/dist/transformers.web.min.js';
+  var $ = function (id) { return document.getElementById(id); };
+
+  // ---------------- Diagnostics ----------------
+  var checks = [
+    { id: 'secure', label: 'Secure page (HTTPS)' },
+    { id: 'micApi', label: 'Microphone API available' },
+    { id: 'shareApi', label: 'Screen and audio sharing API available' },
+    { id: 'gpu', label: 'WebGPU for fast transcription' },
+    { id: 'model', label: 'Speech model downloaded and loaded' },
+    { id: 'mic', label: 'Microphone captured' },
+    { id: 'call', label: 'Call audio captured' },
+    { id: 'speed', label: 'Transcribes faster than real time' }
+  ];
+  var res = {};
+  function setCheck(id, state, note) { res[id] = { state: state, note: note || '' }; drawChecks(); }
+  function drawChecks() {
+    $('checks').innerHTML = checks.map(function (c) {
+      var r = res[c.id] || { state: 'wait', note: 'not tested yet' };
+      var ic = r.state === 'pass' ? '✓' : r.state === 'fail' ? '✕' : '·';
+      return '<li><span class="ic ' + r.state + '">' + ic + '</span><span>' + c.label + (r.note ? '<small>' + esc(r.note) + '</small>' : '') + '</span></li>';
+    }).join('');
+  }
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+
+  setCheck('secure', window.isSecureContext ? 'pass' : 'fail', window.isSecureContext ? '' : 'Open this page over https:// or from localhost.');
+  var md = navigator.mediaDevices;
+  setCheck('micApi', md && md.getUserMedia ? 'pass' : 'fail');
+  setCheck('shareApi', md && md.getDisplayMedia ? 'pass' : 'fail', md && md.getDisplayMedia ? '' : 'Use a recent Edge or Chrome.');
+  var gpuOk = false;
+  (async function () {
+    if (!navigator.gpu) { setCheck('gpu', 'fail', 'Not available. Will fall back to the slower CPU mode.'); return; }
+    try {
+      var a = await navigator.gpu.requestAdapter();
+      if (!a) throw new Error('no adapter');
+      gpuOk = true;
+      var info = a.info || {};
+      setCheck('gpu', 'pass', [info.vendor, info.architecture, info.description].filter(Boolean).join(' · ') || 'Adapter found');
+    } catch (e) { setCheck('gpu', 'fail', 'No GPU adapter (' + e.message + '). Will fall back to CPU mode.'); }
+  })();
+
+  // ---------------- Worker running Whisper ----------------
+  var workerSrc = [
+    "import { pipeline, env } from '" + TJS + "';",
+    "env.allowLocalModels = false;",
+    "let asr = null;",
+    "self.onmessage = async (e) => {",
+    "  const m = e.data;",
+    "  if (m.type === 'load') {",
+    "    try {",
+    "      const opts = { device: m.device, progress_callback: (p) => self.postMessage({ type: 'progress', p }) };",
+    "      opts.dtype = m.device === 'webgpu' ? { encoder_model: 'fp32', decoder_model_merged: 'q4' } : 'q8';",
+    "      asr = await pipeline('automatic-speech-recognition', m.model, opts);",
+    "      // warm-up so the first real chunk is not slow",
+    "      await asr(new Float32Array(16000), { language: 'en', task: 'transcribe' });",
+    "      self.postMessage({ type: 'ready', device: m.device });",
+    "    } catch (err) { self.postMessage({ type: 'error', message: String(err && err.message || err) }); }",
+    "  } else if (m.type === 'run') {",
+    "    const t0 = performance.now();",
+    "    try {",
+    "      const o = { task: 'transcribe', chunk_length_s: 30 };",
+    "      if (m.language) o.language = m.language;",
+    "      const out = await asr(m.audio, o);",
+    "      self.postMessage({ type: 'result', id: m.id, text: (out.text || '').trim(), ms: performance.now() - t0 });",
+    "    } catch (err) { self.postMessage({ type: 'result', id: m.id, text: '', error: String(err && err.message || err), ms: performance.now() - t0 }); }",
+    "  }",
+    "};"
+  ].join('\n');
+  var worker = null, ready = false, busy = false, queue = [], files = {};
+  var totalAudio = 0, totalMs = 0, seq = 0;
+
+  $('loadBtn').addEventListener('click', function () {
+    if (worker) worker.terminate();
+    ready = false; files = {};
+    $('loadBtn').disabled = true;
+    status('loadStatus', 'Downloading model. The first time can take a minute.');
+    var url = URL.createObjectURL(new Blob([workerSrc], { type: 'text/javascript' }));
+    worker = new Worker(url, { type: 'module' });
+    worker.onerror = function (e) { status('loadStatus', 'Could not start the transcription worker: ' + (e.message || 'blocked script') + '. Your network may block cdn.jsdelivr.net.', 'err'); setCheck('model', 'fail', 'Worker failed to start; cdn.jsdelivr.net may be blocked.'); $('loadBtn').disabled = false; };
+    worker.onmessage = onWorker;
+    worker.postMessage({ type: 'load', model: $('model').value, device: gpuOk ? 'webgpu' : 'wasm' });
+  });
+
+  function onWorker(e) {
+    var m = e.data;
+    if (m.type === 'progress') {
+      var p = m.p;
+      if (p.file && p.total) { files[p.file] = { loaded: p.loaded || 0, total: p.total }; }
+      if (p.status === 'done' && p.file && files[p.file]) files[p.file].loaded = files[p.file].total;
+      var L = 0, T = 0; Object.keys(files).forEach(function (k) { L += files[k].loaded; T += files[k].total; });
+      if (T) { $('loadBar').style.width = (100 * L / T).toFixed(1) + '%'; status('loadStatus', 'Downloading ' + (L / 1048576).toFixed(0) + ' of ' + (T / 1048576).toFixed(0) + ' MB…'); }
+      if (p.status === 'ready') status('loadStatus', 'Preparing model…');
+    } else if (m.type === 'ready') {
+      ready = true; $('loadBtn').disabled = false; $('loadBar').style.width = '100%';
+      status('loadStatus', 'Ready · running on ' + (m.device === 'webgpu' ? 'GPU (WebGPU)' : 'CPU (WebAssembly)'), 'ok');
+      setCheck('model', 'pass', $('model').selectedOptions[0].textContent + ' on ' + (m.device === 'webgpu' ? 'GPU' : 'CPU'));
+      pump();
+    } else if (m.type === 'error') {
+      $('loadBtn').disabled = false;
+      status('loadStatus', 'Model failed to load: ' + m.message + '. If this mentions fetch or network, your company network may block huggingface.co.', 'err');
+      setCheck('model', 'fail', m.message);
+    } else if (m.type === 'result') {
+      busy = false;
+      var job = pending[m.id]; delete pending[m.id];
+      if (job) {
+        totalAudio += job.audio.length / 16000; totalMs += m.ms;
+        var rtf = totalAudio / (totalMs / 1000);
+        $('rtfStat').textContent = 'speed ' + rtf.toFixed(1) + '× real time';
+        $('audioStat').textContent = totalAudio.toFixed(0) + ' s transcribed';
+        if (totalAudio > 20) setCheck('speed', rtf >= 1.2 ? 'pass' : 'fail', rtf.toFixed(1) + '× real time' + (rtf < 1.2 ? '. Try the Tiny model.' : ''));
+        if (m.text && !isJunk(m.text)) addLine(job.t, job.who, m.text);
+      }
+      pump();
+    }
+  }
+  var pending = {};
+  function isJunk(t) {
+    var s = t.toLowerCase().replace(/[^a-zÀ-ɏ ]/g, '').trim();
+    return !s || /^\[.*\]$|^\(.*\)$/.test(t.trim()) || ['thank you', 'thanks for watching', 'you', 'bye'].indexOf(s) >= 0;
+  }
+  function enqueue(job) {
+    queue.push(job);
+    if (queue.length > 12) queue.shift(); // keep up rather than fall far behind
+    pump();
+  }
+  function pump() {
+    $('queueStat').textContent = 'queue ' + queue.length;
+    if (!ready || busy || !queue.length) return;
+    var job = queue.shift(); busy = true;
+    var id = ++seq; pending[id] = job;
+    worker.postMessage({ type: 'run', id: id, audio: job.audio, language: $('lang').value || null }, [job.audio.buffer]);
+    $('queueStat').textContent = 'queue ' + queue.length;
+  }
+
+  // ---------------- Audio capture + simple voice detection ----------------
+  var ctx = null;
+  var workletSrc = "class Tap extends AudioWorkletProcessor{constructor(){super();this.b=new Float32Array(2048);this.n=0;}process(i){const c=i[0];if(c&&c.length){const L=c[0].length;for(let k=0;k<L;k++){let v=0;for(let ch=0;ch<c.length;ch++)v+=c[ch][k];this.b[this.n++]=v/c.length;if(this.n===this.b.length){this.port.postMessage(this.b);this.b=new Float32Array(2048);this.n=0;}}}return true;}}registerProcessor('tap',Tap);";
+  async function getCtx() {
+    if (ctx) return ctx;
+    ctx = new AudioContext();
+    await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([workletSrc], { type: 'text/javascript' })));
+    return ctx;
+  }
+  function Segmenter(who, lvlEl) {
+    this.who = who; this.lvl = lvlEl;
+    this.buf = []; this.len = 0; this.speech = false; this.silence = 0; this.voiced = 0; this.pre = []; this.start = null;
+  }
+  Segmenter.prototype.push = function (x16) {
+    // x16: Float32Array at 16 kHz, ~2048*16000/sr samples
+    var rms = 0; for (var i = 0; i < x16.length; i++) rms += x16[i] * x16[i]; rms = Math.sqrt(rms / x16.length);
+    this.lvl.style.width = Math.min(100, rms * 900).toFixed(0) + '%';
+    var dur = x16.length / 16000, thr = +$('thr').value;
+    if (rms > thr) {
+      if (!this.speech) { this.speech = true; this.start = new Date(Date.now() - 300); this.buf = this.pre.slice(); this.len = this.buf.reduce(function (a, b) { return a + b.length; }, 0); this.voiced = 0; }
+      this.silence = 0; this.voiced += dur;
+    } else if (this.speech) { this.silence += dur; }
+    if (this.speech) { this.buf.push(x16); this.len += x16.length; }
+    else { this.pre.push(x16); var pl = 0; for (var j = this.pre.length - 1; j >= 0; j--) { pl += this.pre[j].length; if (pl > 4800) { this.pre = this.pre.slice(j); break; } } }
+    if (this.speech && (this.silence > 0.8 || this.len / 16000 > 15)) this.flush();
+  };
+  Segmenter.prototype.flush = function () {
+    if (this.speech && this.voiced > 0.5) {
+      var out = new Float32Array(this.len), o = 0;
+      this.buf.forEach(function (b) { out.set(b, o); o += b.length; });
+      enqueue({ who: this.who, t: this.start, audio: out });
+    }
+    this.speech = false; this.buf = []; this.len = 0; this.silence = 0; this.pre = [];
+  };
+  function resampler(fromRate) {
+    var ratio = fromRate / 16000, carry = 0;
+    return function (x) {
+      var n = Math.floor((x.length - carry) / ratio), y = new Float32Array(Math.max(0, n));
+      for (var i = 0; i < n; i++) {
+        var p = carry + i * ratio, a = Math.floor(p), f = p - a;
+        y[i] = (x[a] || 0) * (1 - f) + (x[a + 1] !== undefined ? x[a + 1] : x[a] || 0) * f;
+      }
+      carry = carry + n * ratio - x.length; if (carry < 0) carry = 0;
+      return y;
+    };
+  }
+  async function attach(stream, who, lvlId) {
+    var c = await getCtx(); if (c.state === 'suspended') await c.resume();
+    var src = c.createMediaStreamSource(stream);
+    var node = new AudioWorkletNode(c, 'tap');
+    var seg = new Segmenter(who, $(lvlId)), rs = resampler(c.sampleRate);
+    node.port.onmessage = function (e) { seg.push(rs(e.data)); };
+    src.connect(node); // not connected to speakers, so no echo
+    return { stop: function () { seg.flush(); src.disconnect(); node.disconnect(); stream.getTracks().forEach(function (t) { t.stop(); }); $(lvlId).style.width = '0'; } };
+  }
+
+  var mic = null, call = null;
+  $('micBtn').addEventListener('click', async function () {
+    if (mic) { mic.stop(); mic = null; this.textContent = 'Start microphone'; $('micState').textContent = 'off'; return; }
+    try {
+      var s = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+      mic = await attach(s, 'You', 'micLvl');
+      this.textContent = 'Stop microphone'; $('micState').textContent = 'live';
+      var label = s.getAudioTracks()[0].label;
+      status('micStatus', 'Listening on ' + label, 'ok'); setCheck('mic', 'pass', label);
+    } catch (e) {
+      status('micStatus', 'Microphone blocked: ' + e.name + '. Allow microphone access in the address bar, or ask IT whether websites may use the mic.', 'err');
+      setCheck('mic', 'fail', e.name + ': ' + e.message);
+    }
+  });
+  $('callBtn').addEventListener('click', async function () {
+    var btn = this;
+    if (call) { call.stop(); call = null; btn.textContent = 'Share call audio'; $('callState').textContent = 'off'; return; }
+    try {
+      var s = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+        systemAudio: 'include', selfBrowserSurface: 'exclude', surfaceSwitching: 'include'
+      });
+      var at = s.getAudioTracks(), vt = s.getVideoTracks()[0];
+      var surface = vt && vt.getSettings ? vt.getSettings().displaySurface : '';
+      if (!at.length) {
+        s.getTracks().forEach(function (t) { t.stop(); });
+        var hint = surface === 'window' ? 'A single window cannot share audio on Windows. Choose Entire screen or a tab instead.' : 'Share again and turn on the "Also share system audio" (or "tab audio") switch in the dialog.';
+        status('callStatus', 'Sharing started but no audio came with it. ' + hint, 'err');
+        setCheck('call', 'fail', 'No audio track (' + (surface || 'unknown surface') + ')');
+        return;
+      }
+      if (vt) vt.enabled = false; // we only need sound
+      call = await attach(new MediaStream(at), 'Call', 'callLvl');
+      at[0].addEventListener('ended', function () { if (call) { call.stop(); call = null; } btn.textContent = 'Share call audio'; $('callState').textContent = 'off'; status('callStatus', 'Sharing stopped.'); });
+      s.getVideoTracks().forEach(function (t) { t.addEventListener('ended', function () { at.forEach(function (a) { a.stop(); }); }); });
+      btn.textContent = 'Stop sharing'; $('callState').textContent = 'live';
+      var what = surface === 'monitor' ? 'system audio (entire screen)' : surface === 'browser' ? 'tab audio' : 'audio';
+      status('callStatus', 'Capturing ' + what + '. The browser may show a sharing bar; that is expected.', 'ok');
+      setCheck('call', 'pass', what);
+    } catch (e) {
+      var msg = e.name === 'NotAllowedError' ? 'Sharing was cancelled or blocked. If you did not cancel it, your company policy may block screen sharing to websites.' : e.name + ': ' + e.message;
+      status('callStatus', msg, 'err'); setCheck('call', 'fail', msg);
+    }
+  });
+
+  // ---------------- Transcript ----------------
+  var lines = [];
+  function hhmmss(d) { return d.toTimeString().slice(0, 8); }
+  function addLine(t, who, text) {
+    lines.push({ t: t, who: who, text: text });
+    var empty = $('txEmpty'); if (empty) empty.remove();
+    var el = document.createElement('div'); el.className = 'line';
+    el.innerHTML = '<span class="t">' + hhmmss(t) + '</span><span class="chip ' + (who === 'You' ? 'you' : 'call') + '">' + who + '</span><span>' + esc(text) + '</span>';
+    var box = $('tx'), atEnd = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+    box.appendChild(el); if (atEnd) box.scrollTop = box.scrollHeight;
+  }
+  function asText() { return lines.map(function (l) { return hhmmss(l.t) + '  ' + l.who + ': ' + l.text; }).join('\n'); }
+  function copy(text, statusId, btn) {
+    var done = function () { if (statusId) status(statusId, 'Copied.', 'ok'); else { var o = btn.textContent; btn.textContent = 'Copied'; setTimeout(function () { btn.textContent = o; }, 1500); } };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, function () { fallbackCopy(text); done(); });
+    else { fallbackCopy(text); done(); }
+  }
+  function fallbackCopy(text) { var ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); } catch (e) {} ta.remove(); }
+  $('copyTx').addEventListener('click', function () { copy(asText(), null, this); });
+  $('saveTx').addEventListener('click', function () {
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([asText()], { type: 'text/plain' }));
+    a.download = 'dayline-transcript-' + new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-') + '.txt';
+    a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+  });
+  $('clearTx').addEventListener('click', function () { lines = []; $('tx').innerHTML = '<div class="empty" id="txEmpty">Transcript cleared.</div>'; });
+  $('copyReport').addEventListener('click', function () {
+    var r = ['Dayline capture test report', new Date().toISOString(), navigator.userAgent, ''];
+    checks.forEach(function (c) { var x = res[c.id] || { state: 'wait', note: 'not tested' }; r.push((x.state === 'pass' ? 'PASS ' : x.state === 'fail' ? 'FAIL ' : '---- ') + c.label + (x.note ? ' — ' + x.note : '')); });
+    r.push('', $('rtfStat').textContent, $('audioStat').textContent);
+    copy(r.join('\n'), 'reportStatus');
+  });
+  function status(id, text, cls) { var el = $(id); el.textContent = text; el.className = 'status' + (cls ? ' ' + cls : ''); }
+  drawChecks();
+})();
+</script>
+</body>
+</html>

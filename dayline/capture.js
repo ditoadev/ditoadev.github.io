@@ -6,8 +6,10 @@ const WORKER_URL = '../dayline-test/worker.js';
 const SR = 16000;
 
 export const MODELS = {
-  'base-gpu': { model: 'onnx-community/whisper-base', device: { encoder_model: 'webgpu', decoder_model_merged: 'wasm' }, dtype: { encoder_model: 'fp16', decoder_model_merged: 'q8' }, label: 'Base on GPU', gpu: true },
-  'tiny-gpu': { model: 'onnx-community/whisper-tiny', device: 'webgpu', dtype: 'fp16', label: 'Tiny on GPU', gpu: true },
+  // Base runs its encoder at full precision on the GPU: half precision garbled the audio features on
+  // some GPUs and sent Whisper into repetition loops. The decoder runs on the CPU (its GPU file is over 100 MB).
+  'base-gpu': { model: 'onnx-community/whisper-base', device: { encoder_model: 'webgpu', decoder_model_merged: 'wasm' }, dtype: { encoder_model: 'fp32', decoder_model_merged: 'q8' }, label: 'Base on GPU', gpu: true },
+  'tiny-gpu': { model: 'onnx-community/whisper-tiny', device: 'webgpu', dtype: 'fp16', label: 'Tiny on GPU', gpu: true, f16: true },
   'tiny-cpu': { model: 'onnx-community/whisper-tiny', device: 'wasm', dtype: 'q8', label: 'Tiny on CPU' },
   'base-cpu': { model: 'onnx-community/whisper-base', device: 'wasm', dtype: 'q8', label: 'Base on CPU' },
 };
@@ -17,9 +19,8 @@ export async function detectGpu() {
     if (!navigator.gpu) return { ok: false, why: 'WebGPU not available' };
     const a = await navigator.gpu.requestAdapter();
     if (!a) return { ok: false, why: 'No GPU adapter' };
-    if (!a.features.has('shader-f16')) return { ok: false, why: 'GPU lacks half precision' };
     const i = a.info || {};
-    return { ok: true, name: [i.vendor, i.architecture].filter(Boolean).join(' · ') || 'GPU' };
+    return { ok: true, f16: a.features.has('shader-f16'), name: [i.vendor, i.architecture].filter(Boolean).join(' · ') || 'GPU' };
   } catch (e) { return { ok: false, why: e.message }; }
 }
 

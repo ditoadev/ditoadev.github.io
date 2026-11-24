@@ -96,7 +96,7 @@ details ol { margin: 8px 0 0; padding-left: 1.2em; color: var(--ink-2); font-siz
       <div class="row">
         <label for="model">Model
           <select id="model">
-            <option value="base-gpu" selected>Base on GPU · ~95 MB · recommended</option>
+            <option value="base-gpu" selected>Base on GPU · ~135 MB · recommended</option>
             <option value="tiny-gpu">Tiny on GPU · ~80 MB · fastest</option>
             <option value="tiny-cpu">Tiny on CPU · ~45 MB</option>
             <option value="base-cpu">Base on CPU · ~80 MB · more accurate</option>
@@ -180,9 +180,9 @@ details ol { margin: 8px 0 0; padding-left: 1.2em; color: var(--ink-2); font-siz
 (function () {
   'use strict';
   var MODELS = {
-    // Base's GPU decoder file is over GitHub's 100 MB limit, so the encoder runs on the GPU and the decoder on the CPU.
-    'base-gpu': { model: 'onnx-community/whisper-base', device: { encoder_model: 'webgpu', decoder_model_merged: 'wasm' }, dtype: { encoder_model: 'fp16', decoder_model_merged: 'q8' }, label: 'Base on GPU', gpu: true },
-    'tiny-gpu': { model: 'onnx-community/whisper-tiny', device: 'webgpu', dtype: 'fp16', label: 'Tiny on GPU', gpu: true },
+    // Base: full-precision encoder on the GPU (half precision caused repetition loops on some GPUs); decoder on the CPU, since its GPU file is over GitHub's 100 MB limit.
+    'base-gpu': { model: 'onnx-community/whisper-base', device: { encoder_model: 'webgpu', decoder_model_merged: 'wasm' }, dtype: { encoder_model: 'fp32', decoder_model_merged: 'q8' }, label: 'Base on GPU', gpu: true },
+    'tiny-gpu': { model: 'onnx-community/whisper-tiny', device: 'webgpu', dtype: 'fp16', label: 'Tiny on GPU', gpu: true, f16: true },
     'tiny-cpu': { model: 'onnx-community/whisper-tiny', device: 'wasm', dtype: 'q8', label: 'Tiny on CPU' },
     'base-cpu': { model: 'onnx-community/whisper-base', device: 'wasm', dtype: 'q8', label: 'Base on CPU' }
   };
@@ -215,7 +215,7 @@ details ol { margin: 8px 0 0; padding-left: 1.2em; color: var(--ink-2); font-siz
   var md = navigator.mediaDevices;
   setCheck('micApi', md && md.getUserMedia ? 'pass' : 'fail');
   setCheck('shareApi', md && md.getDisplayMedia ? 'pass' : 'fail', md && md.getDisplayMedia ? '' : 'Use a recent Edge or Chrome.');
-  var gpuOk = false;
+  var gpuOk = false, gpuF16 = false;
   (async function () {
     if (!navigator.gpu) { setCheck('gpu', 'fail', 'Not available. Will fall back to the slower CPU mode.'); return; }
     try {
@@ -223,9 +223,9 @@ details ol { margin: 8px 0 0; padding-left: 1.2em; color: var(--ink-2); font-siz
       if (!a) throw new Error('no adapter');
       var info = a.info || {};
       var name = [info.vendor, info.architecture, info.description].filter(Boolean).join(' · ') || 'Adapter found';
-      if (!a.features.has('shader-f16')) { setCheck('gpu', 'fail', name + ', but no half-precision support. Use a CPU model.'); return; }
       gpuOk = true;
-      setCheck('gpu', 'pass', name);
+      gpuF16 = a.features.has('shader-f16');
+      setCheck('gpu', 'pass', name + (gpuF16 ? '' : ' (no half precision: Tiny on GPU unavailable)'));
     } catch (e) { setCheck('gpu', 'fail', 'No GPU adapter (' + e.message + '). Use a CPU model.'); }
     if (!gpuOk) $('model').value = 'base-cpu';
   })();
@@ -248,7 +248,7 @@ details ol { margin: 8px 0 0; padding-left: 1.2em; color: var(--ink-2); font-siz
     ready = false; files = {};
     $('loadBtn').disabled = true;
     var cfg = MODELS[$('model').value];
-    if (cfg.gpu && !gpuOk) { status('loadStatus', 'This laptop has no suitable GPU. Pick a CPU model.', 'err'); $('loadBtn').disabled = false; return; }
+    if ((cfg.gpu && !gpuOk) || (cfg.f16 && !gpuF16)) { status('loadStatus', 'This laptop has no suitable GPU. Pick a CPU model.', 'err'); $('loadBtn').disabled = false; return; }
     status('loadStatus', 'Starting…');
     var alive = false;
     try { worker = new Worker('worker.js', { type: 'module' }); }

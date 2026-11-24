@@ -63,10 +63,43 @@ self.onmessage = async (e) => {
 };
 
 async function transcribe(audio, language) {
-  const o = { task: 'transcribe', chunk_length_s: 30 };
+  const secs = audio.length / SR;
+  const o = {
+    task: 'transcribe',
+    chunk_length_s: 30,
+    // Guards against Whisper's repetition loops ("we we we we …"):
+    // no repeated 3-word phrases, and a token budget that fits the clip's length
+    // (fast speech is ~4-5 tokens per second).
+    no_repeat_ngram_size: 3,
+    max_new_tokens: Math.min(440, Math.ceil(secs * 7) + 12),
+  };
   if (language) o.language = language;
   const out = await asr(audio, o);
-  return (out.text || '').trim();
+  return cleanText(out.text || '');
+}
+
+// Remove any loop that still gets through: a word or short phrase repeated 4+ times in a row
+// is collapsed to one occurrence; a line that is nothing but such a loop is dropped.
+function cleanText(text) {
+  let words = text.trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return '';
+  const norm = (w) => w.toLowerCase().replace(/[^\p{L}\p{N}']/gu, '');
+  let looped = false;
+  for (let n = 1; n <= 4; n++) {
+    const out = [];
+    for (let i = 0; i < words.length;) {
+      let reps = 1;
+      const unit = words.slice(i, i + n).map(norm).join(' ');
+      while (unit && i + (reps + 1) * n <= words.length && words.slice(i + reps * n, i + (reps + 1) * n).map(norm).join(' ') === unit) reps++;
+      if (reps >= 4) { out.push(...words.slice(i, i + n)); i += reps * n; looped = true; }
+      else { out.push(words[i]); i++; }
+    }
+    words = out;
+  }
+  const result = words.join(' ').trim();
+  // After collapsing, a loop leaves one or two words of "content": treat that as noise.
+  if (looped && words.length <= 2) return '';
+  return result;
 }
 
 // ---- Speaker separation -------------------------------------------------
